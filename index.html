@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulatore Topologie di Rete</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; }
+    #toolbar { width: 200px; background: #f4f4f4; padding: 10px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
+    #toolbar h2 { font-size: 1.2rem; margin-bottom: 10px; }
+    .tool-btn { display: block; width: 100%; margin: 5px 0; padding: 8px; background: #fff; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; text-align: left; }
+    .tool-btn.active { background: #d0eaff; border-color: #6fbfff; }
+    #canvas-container { flex: 1; position: relative; overflow: hidden; }
+    svg { width: 100%; height: 100%; background: #fff; }
+    .node { cursor: move; }
+    .node circle { stroke: #333; stroke-width: 1.5px; }
+    .node text { font-size: 12px; pointer-events: none; }
+    .edge { stroke: #666; stroke-width: 2px; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <h2>Strumenti</h2>
+    <button class="tool-btn" data-tool="select">Seleziona</button>
+    <button class="tool-btn" data-tool="computer">Computer</button>
+    <button class="tool-btn" data-tool="router">Router</button>
+    <button class="tool-btn" data-tool="switch">Switch</button>
+    <button class="tool-btn" data-tool="hub">Hub</button>
+    <button class="tool-btn" data-tool="link">Collega</button>
+    <button class="tool-btn" data-tool="delete">Cancella</button>
+  </div>
+  <div id="canvas-container">
+    <svg id="svg-canvas"></svg>
+  </div>
+
+  <script>
+    const svg = document.getElementById('svg-canvas');
+    let tool = 'select';
+    let nodes = [];
+    let edges = [];
+    let nodeIdCounter = 0;
+    let tempLink = { start: null };
+
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        tool = btn.dataset.tool;
+        tempLink.start = null;
+      });
+    });
+    document.querySelector('.tool-btn[data-tool="select"]').classList.add('active');
+
+    svg.addEventListener('click', onCanvasClick);
+
+    function onCanvasClick(evt) {
+      const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+      const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+      if (['computer','router','switch','hub'].includes(tool)) {
+        createNode(tool, svgP.x, svgP.y);
+      }
+    }
+
+    function createNode(type, x, y) {
+      const id = 'n' + (nodeIdCounter++);
+      const group = document.createElementNS('http://www.w3.org/2000/svg','g');
+      group.setAttribute('class','node');
+      group.setAttribute('data-id',id);
+      group.setAttribute('data-type',type);
+      group.setAttribute('transform',`translate(${x},${y})`);
+      const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      circle.setAttribute('r',20);
+      circle.setAttribute('fill', getColor(type));
+      const text = document.createElementNS('http://www.w3.org/2000/svg','text');
+      text.setAttribute('x',0); text.setAttribute('y',5); text.setAttribute('text-anchor','middle');
+      text.textContent = type;
+      group.appendChild(circle); group.appendChild(text);
+      svg.appendChild(group);
+      nodes.push({ id, el: group, x, y, type });
+      makeDraggable(group);
+      group.addEventListener('click', onNodeClick);
+    }
+
+    function getColor(type) {
+      switch(type) {
+        case 'computer': return '#a8d5e2';
+        case 'router': return '#f7a072';
+        case 'switch': return '#e8d67b';
+        case 'hub': return '#c3a6b1';
+        default: return '#ccc';
+      }
+    }
+
+    function onNodeClick(evt) {
+      evt.stopPropagation();
+      const id = evt.currentTarget.dataset.id;
+      if (tool==='link') {
+        if (!tempLink.start) {
+          tempLink.start = id;
+          evt.currentTarget.querySelector('circle').setAttribute('stroke','#00f');
+        } else if (tempLink.start && tempLink.start !== id) {
+          createEdge(tempLink.start, id);
+          // reset highlight
+          const n = svg.querySelector(`[data-id='${tempLink.start}'] circle`);
+          n.setAttribute('stroke','#333');
+          tempLink.start = null;
+        }
+      } else if (tool==='delete') {
+        deleteNode(id);
+      }
+    }
+
+    function createEdge(a, b) {
+      const nA = nodes.find(n=>n.id===a);
+      const nB = nodes.find(n=>n.id===b);
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('class','edge');
+      line.setAttribute('x1',nA.x);
+      line.setAttribute('y1',nA.y);
+      line.setAttribute('x2',nB.x);
+      line.setAttribute('y2',nB.y);
+      svg.insertBefore(line, svg.firstChild);
+      edges.push({ a,b, el: line });
+    }
+
+    function deleteNode(id) {
+      // remove edges
+      edges = edges.filter(e=>{
+        if (e.a===id || e.b===id) {
+          svg.removeChild(e.el);
+          return false;
+        }
+        return true;
+      });
+      // remove node
+      const idx = nodes.findIndex(n=>n.id===id);
+      svg.removeChild(nodes[idx].el);
+      nodes.splice(idx,1);
+    }
+
+    function makeDraggable(el) {
+      let offset = {x:0,y:0};
+      const onMouseMove = (evt) => {
+        const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+        const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+        const newX = svgP.x - offset.x;
+        const newY = svgP.y - offset.y;
+        el.setAttribute('transform',`translate(${newX},${newY})`);
+        const id = el.dataset.id;
+        const node = nodes.find(n=>n.id===id);
+        node.x = newX; node.y = newY;
+        // update connected edges
+        edges.forEach(e=>{
+          if (e.a===id || e.b===id) {
+            const line = e.el;
+            if (e.a===id) { line.setAttribute('x1',newX); line.setAttribute('y1',newY); }
+            if (e.b===id) { line.setAttribute('x2',newX); line.setAttribute('y2',newY); }
+          }
+        });
+      };
+      el.addEventListener('mousedown', (evt)=>{
+        if (tool!=='select') return;
+        evt.stopPropagation();
+        const node = nodes.find(n=>n.id===el.dataset.id);
+        const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+        const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+        offset.x = svgP.x - node.x;
+        offset.y = svgP.y - node.y;
+        svg.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', () => {
+          svg.removeEventListener('mousemove', onMouseMove);
+        }, { once: true });
+      });
+    }
+  </script>
+</body>
+</html>
